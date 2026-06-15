@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>直播三方式对比 · 延迟/清晰度 (CDK)</title>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+<script src="https://player.live-video.net/1.41.0/amazon-ivs-player.min.js"></script>
+<style>
+  :root{--bg:#0e1117;--card:#161b22;--bd:#30363d;--fg:#e6edf3;--mut:#8b949e;--acc:#58a6ff;--good:#3fb950;--warn:#d29922;--bad:#f85149;}
+  *{box-sizing:border-box;}
+  body{font-family:-apple-system,"PingFang SC",sans-serif;background:var(--bg);color:var(--fg);margin:0;padding:20px;}
+  header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:14px;}
+  h1{font-size:20px;margin:0;font-weight:600;}
+  .clock{font-variant-numeric:tabular-nums;font-size:15px;color:var(--acc);background:var(--card);border:1px solid var(--bd);padding:6px 12px;border-radius:8px;}
+  .explain{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:12px 16px;font-size:13px;line-height:1.7;color:var(--mut);margin-bottom:16px;}
+  .explain b{color:var(--fg);}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;}
+  .card{background:var(--card);border:1px solid var(--bd);border-radius:12px;overflow:hidden;display:flex;flex-direction:column;}
+  .card-h{padding:12px 14px;border-bottom:1px solid var(--bd);}
+  .card-h .name{font-size:15px;font-weight:600;}
+  .badges{margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;}
+  .badge{font-size:11px;padding:2px 8px;border-radius:20px;border:1px solid var(--bd);color:var(--mut);}
+  .b-std{background:rgba(248,81,73,.12);color:#ff9b95;border-color:transparent;}
+  .b-ll{background:rgba(210,153,34,.14);color:#e3b341;border-color:transparent;}
+  .b-ivs{background:rgba(63,185,80,.12);color:#56d364;border-color:transparent;}
+  video{width:100%;aspect-ratio:16/9;background:#000;display:block;}
+  .metrics{padding:12px 14px;display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+  .metric{background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:8px 10px;}
+  .metric .k{font-size:11px;color:var(--mut);}
+  .metric .v{font-size:18px;font-weight:600;font-variant-numeric:tabular-nums;margin-top:2px;}
+  .v.good{color:var(--good);} .v.warn{color:var(--warn);} .v.bad{color:var(--bad);}
+  .full{grid-column:1/3;}
+  .res{font-size:12px;color:var(--mut);}
+  .foot{margin-top:18px;font-size:12px;color:var(--mut);line-height:1.7;}
+  .pill{display:inline-block;background:var(--card);border:1px solid var(--bd);border-radius:6px;padding:1px 7px;font-size:11px;color:var(--acc);}
+  .cmds{display:flex;flex-direction:column;gap:10px;}
+  .cmd{background:var(--card);border:1px solid var(--bd);border-radius:10px;overflow:hidden;}
+  .cmd-h{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;font-size:13px;color:var(--fg);border-bottom:1px solid var(--bd);}
+  .cmd-h button{background:var(--acc);color:#0b1220;border:none;border-radius:6px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;}
+  .cmd-h button:hover{opacity:.85;}
+  .cmd pre{margin:0;padding:12px;font-size:12px;line-height:1.5;color:#c9d1d9;white-space:pre-wrap;word-break:break-all;font-family:ui-monospace,Menlo,monospace;}
+  .err{background:rgba(248,81,73,.12);color:#ff9b95;border:1px solid transparent;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:13px;display:none;}
+</style>
+</head>
+<body>
+<header>
+  <h1>🛰️ 直播三方式对比 · <span id="regionLabel">…</span> · CDK 部署</h1>
+  <div class="clock">播放端当前时间 <span id="now">--:--:--.-</span></div>
+</header>
+
+<div class="err" id="cfgErr"></div>
+
+<div class="explain">
+  <b>怎么读延迟：</b>推流端用 ffmpeg 在画面左上角烧录了<b>发送时刻(HH:MM:SS)</b>。把画面里的时间和右上角"播放端当前时间"相减 = <b>端到端总延迟</b>。<br>
+  <b>推流延迟 vs 分发延迟：</b>
+  ① <b>分发延迟</b>＝从云端摄入到你屏幕(转码+打包+CDN+播放器缓冲)＝下方"分发延迟"指标(IVS 为精确值,HLS 为缓冲估算)；
+  ② <b>推流延迟</b>＝从镜头到云端摄入(编码+上行网络)＝<b>总延迟 − 分发延迟</b>。<br>
+  三路<b>同一路推流源</b>,可直观对比延迟、清晰度(分辨率自适应)与流程差异。<br>
+  <b>流畅度说明：</b>已为各路加缓冲+抖动自动恢复+实时追帧(落后时最高1.5x追赶)。LL-HLS 为兼顾低延迟,缓冲较浅,网络差时可能偶有重缓冲——这正是<b>延迟与流畅度的权衡</b>。
+</div>
+
+<div class="grid">
+  <div class="card">
+    <div class="card-h">
+      <div class="name">① 标准 HLS</div>
+      <div class="badges"><span class="badge b-std">6s 分片</span><span class="badge">MediaLive→MediaPackage→CloudFront</span></div>
+    </div>
+    <video id="v1" muted autoplay playsinline controls></video>
+    <div class="metrics">
+      <div class="metric"><div class="k">分发延迟(缓冲估算)</div><div class="v" id="d1">– s</div></div>
+      <div class="metric"><div class="k">当前清晰度</div><div class="v res" id="r1">–</div></div>
+      <div class="metric full"><div class="k">状态</div><div class="v res" id="s1">连接中…</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-h">
+      <div class="name">② 低延迟 LL-HLS</div>
+      <div class="badges"><span class="badge b-ll">1s 分片 · GOP=1</span><span class="badge">CMAF + CloudFront</span></div>
+    </div>
+    <video id="v2" muted autoplay playsinline controls></video>
+    <div class="metrics">
+      <div class="metric"><div class="k">分发延迟(缓冲估算)</div><div class="v" id="d2">– s</div></div>
+      <div class="metric"><div class="k">当前清晰度</div><div class="v res" id="r2">–</div></div>
+      <div class="metric full"><div class="k">状态</div><div class="v res" id="s2">连接中…</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-h">
+      <div class="name">③ Amazon IVS</div>
+      <div class="badges"><span class="badge b-ivs">端到端低延迟</span><span class="badge">全球边缘</span><span class="badge">RTMPS 443</span></div>
+    </div>
+    <video id="v3" muted autoplay playsinline controls></video>
+    <div class="metrics">
+      <div class="metric"><div class="k">分发延迟(精确 getLiveLatency)</div><div class="v" id="d3">– s</div></div>
+      <div class="metric"><div class="k">当前清晰度</div><div class="v res" id="r3">–</div></div>
+      <div class="metric full"><div class="k">状态</div><div class="v res" id="s3">连接中…</div></div>
+    </div>
+  </div>
+</div>
+
+<div class="foot">
+  延迟颜色:<span style="color:var(--good)">绿 ≤3s</span> / <span style="color:var(--warn)">黄 3-8s</span> / <span style="color:var(--bad)">红 &gt;8s</span>。分辨率随网络自适应,体现 ABR 清晰度切换。三路需分别推流(HLS/LL-HLS 同一路到 MediaLive 1935;IVS 到 RTMPS 443)。
+</div>
+
+<h2 style="font-size:17px;margin:24px 0 10px;">📡 推流命令(点"复制",在终端粘贴运行)</h2>
+<div class="cmds">
+  <div class="cmd">
+    <div class="cmd-h"><span>① + ② 推到 MediaLive(摄像头,含时间戳水印)</span><button onclick="cp(this,'c-ml-cam')">复制</button></div>
+    <pre id="c-ml-cam">部署后自动填充…</pre>
+  </div>
+  <div class="cmd">
+    <div class="cmd-h"><span>① + ② 推到 MediaLive(视频文件,把 视频.mp4 换成路径)</span><button onclick="cp(this,'c-ml-file')">复制</button></div>
+    <pre id="c-ml-file">部署后自动填充…</pre>
+  </div>
+  <div class="cmd">
+    <div class="cmd-h"><span>③ 推到 IVS(摄像头,RTMPS 443,公司网通常可推)</span><button onclick="cp(this,'c-ivs-cam')">复制</button></div>
+    <pre id="c-ivs-cam">部署后自动填充…</pre>
+  </div>
+  <div class="cmd">
+    <div class="cmd-h"><span>③ 推到 IVS(视频文件)</span><button onclick="cp(this,'c-ivs-file')">复制</button></div>
+    <pre id="c-ivs-file">部署后自动填充…</pre>
+  </div>
+  <div class="foot" style="margin-top:8px;">提示:同一个摄像头不能被两个 ffmpeg 同时占用。三路同看时,可一路用视频文件推 MediaLive、一路用摄像头推 IVS,或分时段测。</div>
+</div>
+
+<script>
+const WM = "drawtext=fontfile=/System/Library/Fonts/Supplemental/Arial.ttf:text='%{localtime}':x=10:y=10:fontsize=48:fontcolor=yellow:box=1:boxcolor=black@0.6";
+function cp(btn,id){
+  const txt=document.getElementById(id).textContent;
+  navigator.clipboard.writeText(txt).then(()=>{const o=btn.textContent;btn.textContent='已复制 ✓';setTimeout(()=>btn.textContent=o,1500);}).catch(()=>{btn.textContent='复制失败';});
+}
+// 右上角播放端时钟
+setInterval(()=>{const d=new Date();document.getElementById('now').textContent=d.toLocaleTimeString('en-GB')+'.'+String(Math.floor(d.getMilliseconds()/100));},100);
+function color(el,sec){el.classList.remove('good','warn','bad');if(sec<=3)el.classList.add('good');else if(sec<=8)el.classList.add('warn');else el.classList.add('bad');}
+
+function playHls(url,vid,dId,rId,sId,low){
+  const video=document.getElementById(vid),dEl=document.getElementById(dId),rEl=document.getElementById(rId),sEl=document.getElementById(sId);
+  if(Hls.isSupported()){
+    const cfg = low ? {lowLatencyMode:true,liveSyncDurationCount:3,liveMaxLatencyDurationCount:10,maxBufferLength:15,maxLiveSyncPlaybackRate:1.5,enableWorker:true,backBufferLength:30}
+                    : {lowLatencyMode:false,liveSyncDurationCount:4,maxBufferLength:30,maxLiveSyncPlaybackRate:1.5,enableWorker:true,backBufferLength:30};
+    const hls=new Hls(cfg);let recover=0;
+    hls.loadSource(url);hls.attachMedia(video);
+    hls.on(Hls.Events.MANIFEST_PARSED,()=>{sEl.textContent='播放中';video.play().catch(()=>{});});
+    hls.on(Hls.Events.LEVEL_SWITCHED,(e,d)=>{const lv=hls.levels[d.level];if(lv)rEl.textContent=lv.width+'×'+lv.height+' · '+Math.round(lv.bitrate/1000)+'kbps';});
+    hls.on(Hls.Events.ERROR,(e,d)=>{
+      if(!d.fatal)return;
+      if(d.type===Hls.ErrorTypes.NETWORK_ERROR){sEl.textContent='网络抖动,重连中…';hls.startLoad();}
+      else if(d.type===Hls.ErrorTypes.MEDIA_ERROR){sEl.textContent='媒体恢复中…';hls.recoverMediaError();}
+      else if(recover++<3){sEl.textContent='恢复中…';hls.destroy();setTimeout(()=>playHls(url,vid,dId,rId,sId,low),1000);}
+      else sEl.textContent='错误:'+d.details+'(确认是否在推流)';
+    });
+    setInterval(()=>{
+      if(video.buffered.length>0){
+        const drift=video.buffered.end(video.buffered.length-1)-video.currentTime;
+        if(drift<0||drift>120){ dEl.textContent='无流/已停'; dEl.classList.remove('good','warn','bad'); }
+        else { dEl.textContent=drift.toFixed(1)+' s'; color(dEl,drift); }
+      }
+    },500);
+  }else if(video.canPlayType('application/vnd.apple.mpegurl')){video.src=url;sEl.textContent='播放中(Safari原生)';}
+}
+function playIvs(url,vid,dId,rId,sId){
+  const video=document.getElementById(vid),dEl=document.getElementById(dId),rEl=document.getElementById(rId),sEl=document.getElementById(sId);
+  if(IVSPlayer.isPlayerSupported){
+    const p=IVSPlayer.create();p.attachHTMLVideoElement(video);p.load(url);p.setMuted(true);p.play();
+    p.addEventListener(IVSPlayer.PlayerState.PLAYING,()=>{sEl.textContent='播放中';});
+    p.addEventListener(IVSPlayer.PlayerEventType.ERROR,(e)=>{sEl.textContent='错误:'+(e&&e.type||'')+'(确认是否在推流)';});
+    setInterval(()=>{
+      const l=p.getLiveLatency();if(l!=null){dEl.textContent=l.toFixed(1)+' s';color(dEl,l);}
+      const q=p.getQuality();if(q)rEl.textContent=q.width+'×'+q.height+' · '+Math.round(q.bitrate/1000)+'kbps';
+    },500);
+  }else{sEl.textContent='浏览器不支持 IVS Player';}
+}
+
+function fillCommands(cfg){
+  const mlPrimary=(cfg.ingest&&cfg.ingest.mediaLivePrimary)||'<MediaLive 推流地址>';
+  const ivsEp=(cfg.ingest&&cfg.ingest.ivsEndpoint)||'<IVS ingest>';
+  const ivsKey=(cfg.ingest&&cfg.ingest.ivsStreamKey)||'<IVS stream key>';
+  const ivsUrl='rtmps://'+ivsEp+':443/app/'+ivsKey;
+  document.getElementById('c-ml-cam').textContent =
+    `ffmpeg -f avfoundation -framerate 30 -pixel_format uyvy422 -i "0:0" -r 30 -vf "scale=1280:720,${WM}" -c:v libx264 -preset veryfast -g 30 -keyint_min 30 -b:v 2500k -pix_fmt yuv420p -c:a aac -b:a 128k -ar 44100 -f flv ${mlPrimary}`;
+  document.getElementById('c-ml-file').textContent =
+    `ffmpeg -re -i 视频.mp4 -vf "${WM}" -c:v libx264 -preset veryfast -g 30 -keyint_min 30 -b:v 2500k -c:a aac -b:a 128k -f flv ${mlPrimary}`;
+  document.getElementById('c-ivs-cam').textContent =
+    `ffmpeg -f avfoundation -framerate 30 -pixel_format uyvy422 -i "0:0" -r 30 -vf "scale=1280:720,${WM}" -c:v libx264 -preset veryfast -g 60 -b:v 2500k -pix_fmt yuv420p -c:a aac -b:a 128k -ar 44100 -f flv "${ivsUrl}"`;
+  document.getElementById('c-ivs-file').textContent =
+    `ffmpeg -re -i 视频.mp4 -vf "${WM}" -c:v libx264 -preset veryfast -g 60 -b:v 2500k -c:a aac -b:a 128k -f flv "${ivsUrl}"`;
+}
+
+// 加载部署生成的 config.json, 再启动三路播放
+fetch('config.json?ts='+Date.now()).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}).then(cfg=>{
+  document.getElementById('regionLabel').textContent = cfg.region || '';
+  fillCommands(cfg);
+  if(cfg.std) playHls(cfg.std,'v1','d1','r1','s1',false);
+  if(cfg.low) playHls(cfg.low,'v2','d2','r2','s2',true);
+  if(cfg.ivs) playIvs(cfg.ivs,'v3','d3','r3','s3');
+}).catch(e=>{
+  const err=document.getElementById('cfgErr');
+  err.style.display='block';
+  err.textContent='无法加载 config.json('+e.message+')。若刚部署完请稍等自定义资源写入,或确认通过 CloudFront 网站地址(https)访问而非 file://。';
+});
+</script>
+</body>
+</html>
